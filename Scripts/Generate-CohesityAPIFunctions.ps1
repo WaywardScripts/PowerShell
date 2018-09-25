@@ -1,4 +1,5 @@
-﻿function Get-PropertyNames {
+#Last Update 2018/9/25
+function Get-PropertyNames {
     param(
         [Parameter(Mandatory,ValueFromPipeline)]
             $Property
