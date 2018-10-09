@@ -77,7 +77,7 @@ Use 7zip to compress the given directory and then delete it.
 function Compress-DirectoryAndDelete {
     param(
         [Parameter(Mandatory=$true)]
-		[ValidateScript({(gci $path) -is [System.IO.DirectoryInfo]})]
+		[ValidateScript({(gci $path -errorAction SilentlyContinue) -is [System.IO.DirectoryInfo]})]
             [string] $Path,
         [Parameter(Mandatory=$false)]
             [string[]] $ExcludeFileType,
@@ -193,7 +193,7 @@ Author: WaywardScripts - 2018/2
 #>
 function Get-DirHash {
     param(
-        [ValidateScript({ If (Test-Path $_) {$true} Else { Throw "`'$_`' doesn't exist!" } })]
+        [ValidateScript({ If (Test-Path $_) {$true} Else { Throw "`'$_`' doesn't exist!" }})]
 		[Parameter(Mandatory=$true)]$FolderPath,
 		[string]$ExcludeFileTypes = "",
 		[switch]$Forensic=$false
@@ -583,13 +583,18 @@ Useful for when files somehow get stripped of all their permissions.
 Author: WaywardScripts - 2018/5/31
 #>
 function Reset-FSInheritance {
-    gci -Path .\ -Recurse | ? {$_.GetAccessControl().Access.Count -lt 5} | % {
+	param(
+		[Parameter(Mandatory)]
+		[ValidateScript({ If (Test-Path $_) {$true} Else { Throw "`'$_`' doesn't exist!" })]
+		[string[]] $Path
+	)
+	gci -Path $Path -Recurse | % {
 		$acl = Get-acl $_.FullName
 		$acl.SetAccessRuleProtection($true,$false)
 		Set-Acl -Path $acl.Path -AclObject $acl
 		$acl.SetAccessRuleProtection($false,$false)
 		Set-Acl -Path $acl.Path -AclObject $acl
-		"Changed " + $_.FullName
+		$_.FullName
 	}
 }
 <# Sign
@@ -599,8 +604,8 @@ running users certificate.
 .Notes
 Author: WaywardScripts - 2018/5/31
 #>
-function Sign {
-	param([string]$Path)
+function Sign-Script {
+	param([string]$ScriptPath)
 	$cert = gci cert:\CurrentUser\My -CodeSigning
 	Set-AuthenticodeSignature $path $cert -TimestampServer http://timestamp.verisign.com/scripts/timstamp.dll
 }
@@ -612,7 +617,8 @@ Author: WaywardScripts - 2018/5/31
 #>
 function Stop-RemoteProcess {
     param(
-        [Parameter(ValueFromPipeline=$true,Mandatory=$true)][CimInstance] $RemoteProcess
+        [Parameter(ValueFromPipeline=$true,Mandatory=$true)]
+	[CimInstance] $RemoteProcess
     )
     $RemoteProcess | Invoke-CimMethod $_ -MethodName Terminate
 }
