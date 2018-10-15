@@ -1,98 +1,57 @@
 #region DefaultScriptFunctions
-	function Is-Admin {
+    function ConvertTo-HtmlFragment {
+        param(
+            [Parameter(Mandatory)]
+            [string[]] $InputObject
+        )
+        $InputObject = $InputObject.Replace("`n","<br>").Replace("`r","")
+        $InputObject = $InputObject.Replace("`t","    ")
+        $InputObject = "<body>$InputObject</body>"
+        return $InputObject
+    }
+	function Is-Admin {  
 		$user = [Security.Principal.WindowsIdentity]::GetCurrent();
 		return (New-Object Security.Principal.WindowsPrincipal $user).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
 	}
-    
-    function Restore-FSPermissionsFromBackup {
-        param(
-            [Parameter(Mandatory)]
-            [ValidateScript({ If (Test-Path $_) {$True} Else { Throw "`'$_`' doesn't exist!" } })]
-                [string] $BackupLocation,
-            [Parameter(Mandatory)]
-            [ValidateScript({ If (Test-Path $_) {$True} Else { Throw "`'$_`' doesn't exist!" } })]
-                [string] $RestoreLocation
-        )
-        $BackupLocation = Get-Item $BackupLocation | select -ExpandProperty FullName
-        $RestoreLocation = Get-Item $RestoreLocation | select -ExpandProperty FullName
-        try {
-            $ACL = Get-ACL $BackupLocation -ErrorAction Stop -ErrorVariable 'global:Errors'
-        } catch {
-            throw "Unable to access $BackupLocation"
-        }
-        try {
-            Set-ACL -Path $RestoreLocation -AclObject $ACL -ErrorAction Stop -ErrorVariable 'global:Errors'
-        } catch {
-            throw "Unable to access $RestoreLocation"
-        }
-        Get-ChildItem $BackupLocation -Recurse | % {
-            $leafPath = ($_.FullName -split [Regex]::Escape($BackupLocation))[1]
-            $RestorePath = Join-Path $RestoreLocation $leafPath
-            try {
-                $ACL = Get-ACL $_.FullName
-                Set-Acl -Path $RestorePath -AclObject $ACL -ErrorVariable 'global:Errors'
-                Write-Host ("Set: $RestorePath") -ForegroundColor Cyan
-            } catch {
-                Write-Warning "Unable to set permissions on $RestorePath" -WarningVariable 'global:Warnings'
-            }
-        }
-        Write-Verbose "Checking Files..."
-        Get-ChildItem $RestoreLocation -Recurse | % {
-            $leafPath = ($_.FullName -split [Regex]::Escape($RestoreLocation))[1]
-            $BackupPath = Join-Path $BackupLocation $leafPath
-            if (-not (Test-Path $BackupPath)) {
-                Write-Warning "'$leafPath' does not exist in $BackupLocation. Check permissions." -WarningVariable 'global:Warnings'
-            }
-        }
-        Write-Verbose 'All warnings saved in $Warnings'
-        Write-Verbose 'All errors saved in $Errors'
-    }
-
-function Write-Log {
-	[cmdletbinding(defaultparametersetname='info')]
-	param(
-		[Parameter(Position=0,Mandatory)]
-			[string[]] $Message,
-		[Parameter(Position=1)]
-		[ValidateScript({
-			if ($_.Trim() -ne "") {
-			    try {
-				return (Test-Path (Split-Path $_ -Parent -ErrorAction Stop) -ErrorAction Stop)
-			    } catch {
-				throw "Unable to locate path '$_'"
-			    }
-			}
-			return $false
-		})]
-			[string]   $Path,
-			[switch]   $NoDate,
-		[Parameter(parametersetname='error')]
-			[switch]   $Error,
-		[Parameter(parametersetname='info')]
-			[switch]   $Info,
-		[Parameter(parametersetname='warn')]
-			[switch]   $Warning
-	)
+	function Write-Log {
+        [cmdletbinding(defaultparametersetname='info')]
+		param(
+			[Parameter(Mandatory,Position=0)]
+                $Message,
+			    $Path,
+			    [switch] $NoDate,
+            [Parameter(parametersetname='error')]
+                [switch] $Error,
+            [Parameter(parametersetname='info')]
+                [switch] $Info,
+            [Parameter(parametersetname='warn')]
+                [switch] $Warning
+		)
+        $Message = $Message.ToString().split("`n").trim() -join "`n`t"
 		if (-not $NoDate) {
 			$Message = "$(get-date -format "G"): $Message"
 		}
-        if ($PSBoundParameters.ContainsKey('Verbose')) {
-            $temp = $Message.split("`n").trim() -join " "
-            $temp = $temp -split "\. " | ? {$_ -ne "" -or $_ -ne $null}
-            $temp = $temp -join ".`n`t"
-		    Write-Verbose ("`n" + $temp.trim())
-        }
-        if ($PSBoundParameters.ContainsKey('Path')) {
+        #Default to writing the message to host
+        $temp = $Message.split("`n").trim() -join " "
+        $temp = $temp -split "\. " | ? {$_ -ne "" -or $_ -ne $null}
+        $temp = $temp -join ".`n`t"
+		Write-Verbose ("`n" + $temp.trim())
+        if ($Path) {
             $global:LogPath = $Path
         }
-        if ($global:LogPath) {
-            Write-Verbose "Writing to: $global:LogPath"
-            Add-Content -Path $global:LogPath -Value $Message -ErrorAction Stop
-        } else {
-            Write-Warning 'No path specified or known. Log saved to $PSLog'
-            $global:PSLog += $Message
+        # If the parent directory of the LogPath doesn't exist, try to create it.
+        if (-not (Test-Path (Split-Path $global:LogPath -Parent) -ErrorAction Stop)) {
+            try {
+                mkdir (Split-path $global:LogPath -Parent) | Out-Null
+            } catch {
+                $global:PSLog += $Message
+                Write-Warning "Could not write to $global:LogPath. Ensure parent folder exists and you have proper permissions. Log available in `$global:PSLog"
+                return
+            }
         }
-}
+        Write-Verbose "Writing to: $global:LogPath"
+        Add-Content -Path $global:LogPath -Value $Message
+	}
 #endregion
 
 $defaultScriptRoot = '\\server\share$\Powershell\'
@@ -121,15 +80,17 @@ if ([Environment]::UserInteractive) {
         }
     }
     if (-not $NoScriptRoot) {
-        cd $ScriptRoot
-        if (Test-Path (Join-Path $ScriptRoot 'Modules')) {
+        if (Test-Path "$ScriptRoot\Modules") {
             $env:PSModulePath = $env:PSModulePath + ";$(Join-Path $ScriptRoot 'Modules')"
         } else {
             try {
                 mkdir "$ScriptRoot\Modules" -ErrorAction Stop | Out-Null
                 $env:PSModulePath = $env:PSModulePath + ";$(Join-Path $ScriptRoot 'Modules')"
-            } catch {}
+            } catch {
+                Write-Warning "Unable to add $ScriptRoot\Modules to `$env:PSModulePath"
+            }
         }
+        cd $ScriptRoot
         if (Test-Path (Join-Path $ScriptRoot 'PowershellProfile.ps1')) {
             # Quick trick to do a full copy of objects. Isn't really
             # necessary for $profile, but should make it a habit.
@@ -163,20 +124,8 @@ if ([Environment]::UserInteractive) {
             }
         }
     }
-    if (Test-Path (Join-Path $ScriptRoot 'console.msc')) {
-        Set-Alias mmc (Join-Path $ScriptRoot 'console.msc')
-    }
-    function rdp {
-	    param(
-		    [Parameter(Mandatory)]
-                [string] $Server,
-		        [switch] $Wait
-	    )
-	    if ($PSBoundParameters.ContainsKey('Wait')) {
-		    Start-Process mstsc.exe -ArgumentList "/v:$server" -PassThru | Wait-Process
-	    } else {
-		    Start-Process mstsc.exe -ArgumentList "/v:$server"
-	    }
+    if (Test-Path (Join-Path $ScriptRoot "console.msc")) {
+        Set-Alias mmc (Join-Path $ScriptRoot "console.msc")
     }
     function remote {
         param(
@@ -186,31 +135,30 @@ if ([Environment]::UserInteractive) {
         Enter-PSSession -ComputerName $ComputerName
     }
     function prompt {
-        switch ([IntPtr]::Size) {
-            4 {$bitness = '(x32)'}
-            8 {$bitness = '(x64)'}
+        if ((pwd).path -match "::") {
+            ((pwd).path -split "::")[1] + ">"
+        } else {
+            (pwd).path + ">"
         }
         $time = (Get-Date).ToString("h:mm:ss tt")
         $domain = $env:USERDNSDOMAIN.split('.')[0]
         if (Is-Admin) {
-            $WindowTitle = "[Administrator] $domain\$env:USERNAME` - $time - $bitness"
+            $WindowTitle = "[Administrator] $domain\$env:USERNAME` - $time"
         } else {
-            $WindowTitle = "[Non-Administrator] $domain\$env:USERNAME` - $time - $bitness"
+            $WindowTitle = "[Non-Administrator] $domain\$env:USERNAME` - $time"
         }
         $host.ui.RawUI.WindowTitle = $WindowTitle
-        if ($PSDebugContext) {
-            $console = '[DBG]: '
-        }
-        if ((pwd).path -match "::") {
-            $console = $console + ((pwd).path -split "::")[1] + ">"
-        } else {
-            $console = $console + (pwd).path + ">"
-        }
-        return $console
     }
     #Set default log path to $defaultScriptRoot\Users\$env:username
     $AppName = "Users\$env:USERNAME"
 } else {
+    if (-not ($global:PSScriptInfo)) {
+        $global:PSScriptInfo = (Get-PSCallStack)[1]
+        $global:PSScriptInfo | Add-Member -MemberType NoteProperty -Name Error    -TypeName boolean -Value $false -Force
+        $global:PSScriptInfo | Add-Member -MemberType NoteProperty -Name Warning  -TypeName boolean -Value $false -Force
+        $global:PSScriptInfo | Add-Member -MemberType NoteProperty -Name Errors   -Value @() -Force
+        $global:PSScriptInfo | Add-Member -MemberType NoteProperty -Name Warnings -Value @() -Force
+    }
     #Set default log path to $defaultScriptRoot\[Scripts Parent Folder Name]
     $AppName = Split-path -Leaf $PSScriptRoot
 }
@@ -228,9 +176,9 @@ if (-not (Test-Path "\\$defaultScriptRoot\Logs\$AppName")) {
 #Default Email Settings
 $global:EmailSettings = @{
     To         = ''
-    From       = 'PowerShell@domain.net'
+    From       = 'AutoSender@domain.net'
     Subject    = 'PowerShell'
-    SmtpServer = ''
+    SmtpServer = 'relay.domain.net'
     Body       = ''
     BodyAsHTML = $true
 }
@@ -260,7 +208,7 @@ $global:EmailHeader =@"
 "@
 
 #Default Eventlog Details
-$global:EventLogName = 'Windows PowerShell'
+$global:EventLogName = "Windows PowerShell"
 
 #Set Transcript Path and Start logging
 if (-not ($global:TranscriptPath)) {
@@ -272,8 +220,8 @@ if (-not ($global:TranscriptPath)) {
         $TranscriptPath = Join-Path $TranscriptPath "$datetime.log"
         Sleep -Seconds 1
     } catch {
-        if (Test-Path (Join-Path $env:USERPROFILE 'Documents')) {
-            $TranscriptPath = "$env:USERPROFILE\Documents\PowershellTranscript.$datetime.log"
+        if (Test-Path "$env:USERPROFILE\Documents\") {
+            $TranscriptPath = "$env:USERPROFILE\Documents\$datetime.log"
         } else {
             $TranscriptPath = "$env:TEMP\PowershellTranscript.$datetime.log"
         }
