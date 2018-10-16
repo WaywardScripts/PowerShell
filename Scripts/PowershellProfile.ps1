@@ -1,14 +1,4 @@
 #region DefaultScriptFunctions
-    function ConvertTo-HtmlFragment {
-        param(
-            [Parameter(Mandatory)]
-            [string[]] $InputObject
-        )
-        $InputObject = $InputObject.Replace("`n","<br>").Replace("`r","")
-        $InputObject = $InputObject.Replace("`t","    ")
-        $InputObject = "<body>$InputObject</body>"
-        return $InputObject
-    }
 	function Is-Admin {  
 		$user = [Security.Principal.WindowsIdentity]::GetCurrent();
 		return (New-Object Security.Principal.WindowsPrincipal $user).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
